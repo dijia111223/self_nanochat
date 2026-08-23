@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # nanochat
 
 ![nanochat logo](dev/nanochat.png)
@@ -228,3 +229,6 @@ If you find nanochat helpful in your research cite simply as:
 ## License
 
 MIT
+=======
+# self_nanochat
+>>>>>>> 75cfd53353680fe977e05c88242439ab2261a64f
