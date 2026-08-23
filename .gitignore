@@ -11,3 +11,8 @@ eval_bundle/
 # Local setup
 CLAUDE.md
 wandb/
+
+.vscode/
+cnews.train.txt
+cnews_small.txt
+test.txt

@@ -26,21 +26,18 @@ print(f"vocab_size: {args.vocab_size:,}")
 # Text iterator
 
 def text_iterator():
-    """
-    1) Flatten the batches into a single iterator
-    2) Crop every document to args.doc_cap characters
-    3) Break when we've seen args.max_chars characters
-    """
+    """改：读本地小文本，绕开 400B 数据集下载"""
     nchars = 0
-    for batch in parquets_iter_batched(split="train"):
-        for doc in batch:
-            doc_text = doc
-            if len(doc_text) > args.doc_cap:
-                doc_text = doc_text[:args.doc_cap]
-            nchars += len(doc_text)
-            yield doc_text
-            if nchars > args.max_chars:
-                return
+    # 从本地文件读文本（你造一个 test.txt）
+    with open("test.txt", "r", encoding="utf-8") as f:
+        text = f.read()
+    # 按 doc_cap 切成文档
+    for i in range(0, len(text), args.doc_cap):
+        doc_text = text[i:i+args.doc_cap]
+        nchars += len(doc_text)
+        yield doc_text
+        if nchars > args.max_chars:
+            return
 text_iter = text_iterator()
 
 # -----------------------------------------------------------------------------

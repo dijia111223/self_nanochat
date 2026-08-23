@@ -15,8 +15,7 @@ now attend back to the BOS token and sees the full context of the document.
 Fallback to the original if you have very limited data AND long documents:
 https://github.com/karpathy/nanochat/blob/3c3a3d7/nanochat/dataloader.py#L78-L117
 """
-import os
-import re
+
 import torch
 import pyarrow.parquet as pq
 
@@ -70,94 +69,13 @@ def _document_batches(split, resume_state_dict, tokenizer_batch_size):
             pq_idx += 1
         first_pass = False
         epoch += 1
-"""添加本地文本训练功能"""
-def list_text_files(data_dir=None):
-    """返回本地文本文件"""
-    if data_dir is None:
-        data_dir="."
-    if os.path.isfile(data_dir):
-        return [data_dir]
-    txt_files=sorted(
-        [
-            f for f in os.listdir(data_dir)
-            if f.endswith('.txt') and not f.endswith('.tmp')
-        ]
-    )
-    assert len(txt_files)!=0,f"No.txt file in{data_dir}"
-    return [os.path.join(data_dir,f)for f in txt_files]
 
-def txt_to_docs(text,doc_max_char=None):
-    """wenben拆分，txt文件是一整串字符"""
-    raw_docs =re.split(r'\n\s*\n',text)
-    docs=[
-    ]
-    for doc in raw_docs:
-        doc=doc.strip()
-        if not doc:
-            continue
-        if doc_max_char is not None and len(doc)>doc_max_char:
-            for i in range(0,len(doc),doc_max_char):
-                docs.append(doc[i:i+doc_max_char])
-        else:
-            docs.append(doc)
-
-    return docs
-
-def _text_document_batches(split, resume_state_dict, 
-                           tokenizer_batch_size, text_files=None, doc_max_char=10000):
-    ddp,ddp_rank,ddp_local_rank,ddp_world_size=get_dist_info()
-    if text_files is None:
-       text_files = list_text_files()
-    if len(text_files) == 1:
-       pass  # 只有一个文件，train 和 val 都用它
-    else:
-       text_files = text_files[:-1] if split == "train" else text_files[-1:]
-    resume_pq_idx = resume_state_dict["pq_idx"] if resume_state_dict is not None else 0
-    resume_rg_idx = resume_state_dict["rg_idx"] if resume_state_dict is not None else None
-    resume_epoch = resume_state_dict.get("epoch", 1) if resume_state_dict is not None else 1
-    first_pass = True
-    pq_idx = resume_pq_idx
-    epoch = resume_epoch
-
-    while True:
-        pq_idx = resume_pq_idx if first_pass else 0
-        while pq_idx < len(text_files):
-            filepath = text_files[pq_idx]
-            with open(filepath,"r",encoding="utf-8") as f:
-                text=f.read()
-            docs=txt_to_docs(text,doc_max_char)
-            if len(docs)==0:
-                pq_idx+=1
-                continue
-
-            # Start from resume point if resuming on same file, otherwise from DDP rank
-            if first_pass and (resume_rg_idx is not None) and (pq_idx == resume_pq_idx):
-                base_idx = resume_rg_idx // ddp_world_size
-                base_idx += 1  # advance by 1 so we don't repeat data after resuming
-                rg_idx = base_idx * ddp_world_size + ddp_rank
-                if rg_idx >= len(docs):
-                    pq_idx += 1
-                    continue
-                resume_rg_idx = None  # only do this once
-            else:
-                rg_idx = ddp_rank
-            while rg_idx < len(docs):
-                for i in range(ddp_rank, len(docs), tokenizer_batch_size * ddp_world_size):
-                    yield docs[i:i + tokenizer_batch_size], (pq_idx, i, epoch)
-                rg_idx += ddp_world_size
-            pq_idx += 1
-        first_pass = False
-        epoch += 1
-
-        
 
 def tokenizing_distributed_data_loader_with_state_bos_bestfit(
     tokenizer, B, T, split,
     tokenizer_threads=4, tokenizer_batch_size=128,
     device="cuda", resume_state_dict=None,
-    buffer_size=1000,
-    text_path=None,          # 新增：本地文本文件/目录；None 则走 parquet
-    doc_max_char=10000,     # 新增：超长文档按此字符数再切分
+    buffer_size=1000
 ):
     """
     BOS-aligned dataloader with Best-Fit Cropping.
@@ -178,11 +96,7 @@ def tokenizing_distributed_data_loader_with_state_bos_bestfit(
     assert split in ["train", "val"], "split must be 'train' or 'val'"
 
     row_capacity = T + 1
-    if text_path is not None:
-        text_files = list_text_files(text_path)
-        batches = _text_document_batches(split, resume_state_dict, tokenizer_batch_size, text_files, doc_max_char=doc_max_char)
-    else:
-        batches = _document_batches(split, resume_state_dict, tokenizer_batch_size)
+    batches = _document_batches(split, resume_state_dict, tokenizer_batch_size)
     bos_token = tokenizer.get_bos_token_id()
     doc_buffer = []
     pq_idx, rg_idx, epoch = 0, 0, 1
