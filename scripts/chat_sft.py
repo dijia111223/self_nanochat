@@ -64,6 +64,7 @@ parser.add_argument("--chatcore-max-sample", type=int, default=24, help="max pro
 # Data mixture
 parser.add_argument("--mmlu-epochs", type=int, default=3, help="number of epochs of MMLU in training mixture (teaches Multiple Choice)")
 parser.add_argument("--gsm8k-epochs", type=int, default=4, help="number of epochs of GSM8K in training mixture (teaches Math and Tool Use)")
+parser.add_argument("--text-path", type=str, default=None, help="local chat jsonl/txt for SFT (custom extension, bypasses task datasets)")
 args = parser.parse_args()
 user_config = vars(args).copy()
 # -----------------------------------------------------------------------------
@@ -115,7 +116,7 @@ for name, fallback, source in [
         print0(f"Using {name}={arg_val}")
 
 orig_model = model
-model = torch.compile(model, dynamic=False)
+#model = torch.compile(model, dynamic=False)
 depth = model.config.n_layer
 num_flops_per_token = model.estimate_flops()
 tokens_per_fwdbwd = args.device_batch_size * args.max_seq_len # tokens per iteration for a single rank
@@ -159,18 +160,55 @@ for group in optimizer.param_groups:
     group["initial_lr"] = group["lr"]
 
 # SFT data mixture and DataLoader
-train_tasks = [
-    SmolTalk(split="train"), # 460K rows of general conversations
-    *[MMLU(subset="all", split="auxiliary_train") for _ in range(args.mmlu_epochs)], # 100K rows per epoch
-    *[GSM8K(subset="main", split="train") for _ in range(args.gsm8k_epochs)], # 8K rows per epoch
-]
-train_dataset = TaskMixture(train_tasks)
-print0(f"Training mixture: {len(train_dataset):,} rows (MMLU x{args.mmlu_epochs}, GSM8K x{args.gsm8k_epochs})")
-val_dataset = TaskMixture([
-    SmolTalk(split="test"), # 24K rows in test set
-    MMLU(subset="all", split="test", stop=5200), # 14K rows in test set, use only 5.2K to match the train ratios
-    GSM8K(subset="main", split="test", stop=420), # 1.32K rows in test set, use only 420 to match the train ratios
-]) # total: 24K + 5.2K + 0.42K ~= 29.6K rows
+if args.text_path is not None:
+    import json as _json
+    class LocalChatDataset:
+        def __init__(self, path):
+            self.convs = []
+            if path.endswith('.jsonl'):
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            self.convs.append(_json.loads(line))
+            else:
+                with open(path, "r", encoding="utf-8") as f:
+                    text = f.read()
+                for block in text.split('\n\n'):
+                    block = block.strip()
+                    if not block:
+                        continue
+                    messages = []
+                    for line in block.split('\n'):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        if '：' in line:
+                            role, content = line.split('：', 1)
+                            role = 'user' if '用户' in role else 'assistant'
+                            messages.append({"role": role, "content": content.strip()})
+                    if messages:
+                        self.convs.append({"messages": messages})
+        def __len__(self):
+            return len(self.convs)
+        def __getitem__(self, i):
+            return self.convs[i]
+    train_dataset = LocalChatDataset(args.text_path)
+    val_dataset = LocalChatDataset(args.text_path)
+    print0(f"本地对话数据: {len(train_dataset)} 条")
+else:
+    train_tasks = [
+        SmolTalk(split="train"),
+        *[MMLU(subset="all", split="auxiliary_train") for _ in range(args.mmlu_epochs)],
+        *[GSM8K(subset="main", split="train") for _ in range(args.gsm8k_epochs)],
+    ]
+    train_dataset = TaskMixture(train_tasks)
+    print0(f"Training mixture: {len(train_dataset):,} rows")
+    val_dataset = TaskMixture([
+        SmolTalk(split="test"),
+        MMLU(subset="all", split="test", stop=5200),
+        GSM8K(subset="main", split="test", stop=420),
+    ]) # total: 24K + 5.2K + 0.42K ~= 29.6K rows
 # DataLoader is defined here, it emits inputs, targets : 2D tensors of shape (device_batch_size, max_seq_len)
 # A big problem is that we don't know the final num_iterations in advance. So we create
 # these two global variables and update them from within the data generator.

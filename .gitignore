@@ -16,3 +16,8 @@ wandb/
 cnews.train.txt
 cnews_small.txt
 test.txt
+
+*.txt
+cnews_data/
+.claude/
+.ipynb_checkpoints/

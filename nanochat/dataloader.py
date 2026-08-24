@@ -86,31 +86,43 @@ def list_text_files(data_dir=None):
     assert len(txt_files)!=0,f"No.txt file in{data_dir}"
     return [os.path.join(data_dir,f)for f in txt_files]
 
-def txt_to_docs(text,doc_max_char=None):
-    """wenben拆分，txt文件是一整串字符"""
-    raw_docs =re.split(r'\n\s*\n',text)
-    docs=[
-    ]
+def txt_to_docs(text, doc_max_char=None, line_mode=True):
+    """拆分文本为文档。line_mode=True 时按行切（每行一篇，如 cnews 格式 标签\t正文）"""
+    if line_mode:
+        docs = []
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            # 去掉前面的标签
+            if '\t' in line:
+                line = line.split('\t', 1)[1]
+            # 超长再切
+            if doc_max_char is not None and len(line) > doc_max_char:
+                for i in range(0, len(line), doc_max_char):
+                    docs.append(line[i:i+doc_max_char])
+            else:
+                docs.append(line)
+        return docs
+    # 按空行切
+    raw_docs = re.split(r'\n\s*\n', text)
+    docs = []
     for doc in raw_docs:
-        doc=doc.strip()
+        doc = doc.strip()
         if not doc:
             continue
-        if doc_max_char is not None and len(doc)>doc_max_char:
-            for i in range(0,len(doc),doc_max_char):
+        if doc_max_char is not None and len(doc) > doc_max_char:
+            for i in range(0, len(doc), doc_max_char):
                 docs.append(doc[i:i+doc_max_char])
         else:
             docs.append(doc)
-
     return docs
-
 def _text_document_batches(split, resume_state_dict, 
                            tokenizer_batch_size, text_files=None, doc_max_char=10000):
     ddp,ddp_rank,ddp_local_rank,ddp_world_size=get_dist_info()
     if text_files is None:
        text_files = list_text_files()
-    if len(text_files) == 1:
-       pass  # 只有一个文件，train 和 val 都用它
-    else:
+    if len(text_files) > 1:
        text_files = text_files[:-1] if split == "train" else text_files[-1:]
     resume_pq_idx = resume_state_dict["pq_idx"] if resume_state_dict is not None else 0
     resume_rg_idx = resume_state_dict["rg_idx"] if resume_state_dict is not None else None

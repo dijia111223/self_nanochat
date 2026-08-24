@@ -19,7 +19,7 @@
 ### 1. 分词器：tok_train.py 改读本地文本
 - `scripts/tok_train.py` 的 `text_iterator()` 改为读本地 `test.txt`
 - 绕开 400B parquet 数据集下载（climbmix 太大 + HF 证书问题）
-- ⚠️ 坑：改了代码必须 Ctrl+S 保存（踩过：Processed 0 sequences = 没保存）
+
 
 ### 2. dataloader：加本地文本双模式
 - `nanochat/dataloader.py` 新增：
