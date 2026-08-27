@@ -52,9 +52,33 @@ A: <|bos|><|user_start|>你好<|user_end|>你好！很高兴见到你，有什�
 
 > **扩展 nanochat 对话微调支持本地数据**：为 chat_sft 增加 `--text-path` 参数与 LocalChatDataset（OpenAI 对话格式 jsonl），支持自定义中文对话数据 SFT；完整跑通"新闻预训练 → 中文对话 SFT → 模型对话"全链路（AutoDL GPU）。
 
-## 五、下一步（待做）
+## 五、评估块（8.25 新增）
+
+### local_eval.py（评估脚本）
+- **bpb 评估**：`bpb = loss / ln(2)`（每字节比特数，越低越好）
+- **对话测试**：对问题生成回复，观察质量
+- 用法：`python local_eval.py --model-tag d2 --text-path=local_news.txt`
+- 踩坑：RoPE 序列上限（d2=1280）→ 输入要截断 `model.config.sequence_len`
+
+### 8.25 评估结果
+- SFT 后新闻 bpb = 12.91（vs 预训练 3.27）——**灾难性遗忘**（对话微调覆盖新闻能力）
+- 对话测试：乱码（vocab=1000 太小，中文拆成字节 token）
+
+## 六、8.25 学习点总结
+
+1. **bpb 评估**：loss/ln2，数值含义（bpb 3.89≈15 选 1；12.9≈7600 选 1）
+2. **灾难性遗忘**（亲手观察）：SFT 后预训练能力被覆盖（新闻 bpb 3.27→12.91）——真实模型用 LoRA/混合训练/重放缓解
+3. **tokenizer vocab 影响表达力**：1000 对中文太少（拆字节 → 乱码）；真实模型 15 万+
+4. **模型规模是瓶颈**：depth 2 学不好 25 种对话区分——数据决定上限，但模型决定能否到上限
+5. **数据耗尽卡死**：训练步数×batch > 数据量 → 卡；训练前估算数据量
+6. **Windows 编码**：PYTHONUTF8=1 解决 GBK/UTF-8 冲突
+7. **RoPE 上限**：输入超 model.config.sequence_len 会崩，需截断
+8. **本地 vs 云端环境**：CPU 注释 torch.compile（无 cl.exe）；GPU 能编译
+
+## 七、下一步（待做）
 
 1. **更多对话数据**（几百~几千条不同问答）→ 模型从"背答案"到"泛化"
-2. **更大模型**（depth 12+）+ 更多预训练数据 → bpb 更低
+2. **更大模型**（depth 12+ + vocab 5000+）→ 中文表达力 + 对话区分
 3. **本地 4060**：装 CUDA torch（网络问题待解决）→ 本地 GPU 训练省线
 4. **chat_cli 对话接口**（SFT 模型 + 交互对话）
+5. **重构双模式**（本地/云端分离，LOCAL_MODE 开关）
