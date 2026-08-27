@@ -27,7 +27,7 @@ import torch.distributed as dist
 
 from nanochat.gpt import GPT, GPTConfig, Linear
 from nanochat.dataloader import tokenizing_distributed_data_loader_bos_bestfit, tokenizing_distributed_data_loader_with_state_bos_bestfit
-from nanochat.common import compute_init, compute_cleanup, print0, DummyWandb, print_banner, get_base_dir, autodetect_device_type, get_peak_flops, COMPUTE_DTYPE, COMPUTE_DTYPE_REASON, is_ddp_initialized
+from nanochat.common import compute_init, compute_cleanup, print0, DummyWandb, print_banner, get_base_dir, autodetect_device_type, get_peak_flops, COMPUTE_DTYPE, COMPUTE_DTYPE_REASON, LOCAL_MODE,is_ddp_initialized
 from nanochat.tokenizer import get_tokenizer, get_token_bytes
 from nanochat.checkpoint_manager import save_checkpoint, load_checkpoint
 from nanochat.loss_eval import evaluate_bpb
@@ -76,7 +76,8 @@ parser.add_argument("--core-metric-max-per-task", type=int, default=500, help="e
 parser.add_argument("--sample-every", type=int, default=2000, help="sample from model every N steps (-1 = disable)")
 parser.add_argument("--save-every", type=int, default=-1, help="save checkpoints every N steps (-1 = only at end)")
 # Output
-parser.add_argument("--text-path", type=str, default=None, help="local text file/dir for training (custom extension, bypasses parquet)")
+# --text-path 默认值：LOCAL_MODE 开启时自动用本地数据（未指定时提示）
+parser.add_argument("--text-path", type=str, default=None, help="local text file/dir for training (bypasses parquet). LOCAL_MODE=1 时自动启用")
 parser.add_argument("--model-tag", type=str, default=None, help="override model tag for checkpoint directory name")
 args = parser.parse_args()
 user_config = vars(args).copy()  # for logging
@@ -166,6 +167,10 @@ if resuming:
 # FP8 training initialization and management (this has to be done before torch.compile)
 
 # Convert Linear layers to Float8Linear if --fp8 is set
+# 本地模式：禁用 FP8（H100 专属，本地 CPU/小 GPU 不支持）
+if args.fp8 and LOCAL_MODE:
+    print0("⚠️ LOCAL_MODE 下禁用 FP8（需要 H100+ GPU），忽略 --fp8")
+    args.fp8 = False
 if args.fp8:
     if device_type != "cuda":
         print0("Warning: FP8 training requires CUDA, ignoring --fp8 flag")
@@ -329,6 +334,8 @@ if scaler is not None:
 # -----------------------------------------------------------------------------
 # Initialize the DataLoaders for train/val
 dataloader_resume_state_dict = None if not resuming else meta_data["dataloader_state_dict"]
+if args.text_path is None and LOCAL_MODE:
+    print0("⚠️ LOCAL_MODE=1 但未指定 --text-path，请指定本地数据文件")
 train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(tokenizer, args.device_batch_size, args.max_seq_len, split="train", device=device, resume_state_dict=dataloader_resume_state_dict, text_path=args.text_path)
 build_val_loader = lambda: tokenizing_distributed_data_loader_bos_bestfit(tokenizer, args.device_batch_size, args.max_seq_len, split="val", device=device, text_path=args.text_path)
 x, y, dataloader_state_dict = next(train_loader) # kick off load of the very first batch of data

@@ -16,6 +16,7 @@ from filelock import FileLock
 _DTYPE_MAP = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
 def _detect_compute_dtype():
     env = os.environ.get("NANOCHAT_DTYPE")
+    
     if env is not None:
         return _DTYPE_MAP[env], f"set via NANOCHAT_DTYPE={env}"
     if torch.cuda.is_available():
@@ -30,6 +31,9 @@ def _detect_compute_dtype():
     # Note: MPS on recent macOS also handles bf16 fine, opt in via NANOCHAT_DTYPE=bfloat16
     return torch.float32, "auto-detected: no CUDA (CPU/MPS)"
 COMPUTE_DTYPE, COMPUTE_DTYPE_REASON = _detect_compute_dtype()
+# 本地模式开关：NANOCHAT_LOCAL=1 时，训练/微调默认走本地数据（bypass parquet/HF）
+    # 用法：$env:NANOCHAT_LOCAL = "1"  （或 export NANOCHAT_LOCAL=1）
+LOCAL_MODE = os.environ.get("NANOCHAT_LOCAL", "0") == "1"
 
 class ColoredFormatter(logging.Formatter):
     """Custom formatter that adds colors to log messages."""
