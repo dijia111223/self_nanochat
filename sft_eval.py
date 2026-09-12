@@ -21,6 +21,7 @@ parser.add_argument("--model-tag", type=str, default="d8")
 parser.add_argument("--step", type=int, default=None)
 parser.add_argument("--eval-path", type=str, default="sft_eval_cls.jsonl")
 parser.add_argument("--num-samples", type=int, default=200)
+parser.add_argument("--prefix-chars", type=int, default=64, help="给模型看的新闻前缀字数（训练时用 64）")
 parser.add_argument("--max-tokens", type=int, default=8)
 parser.add_argument("--show", type=int, default=6, help="打印前 N 条明细")
 parser.add_argument("--seed", type=int, default=0)
@@ -48,7 +49,7 @@ correct = 0
 shown = 0
 per_class = {lab: [0, 0] for lab in LABELS}
 for r in rows:
-    tokens = [bos, user_start] + tokenizer.encode(PROMPT + r["text"][:64]) + [user_end, assistant_start]
+    tokens = [bos, user_start] + tokenizer.encode(PROMPT + r["text"][:args.prefix_chars]) + [user_end, assistant_start]
     out = []
     for token_column, token_masks in engine.generate(
         tokens, num_samples=1, max_tokens=args.max_tokens, temperature=0.0, top_k=1
