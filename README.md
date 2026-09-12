@@ -82,6 +82,27 @@ python -m scripts.mini_engine --source base --model-tag d8 --compare --compare-t
 
 > **结论**：KV Cache 不改变结果（正确性验证通过），但显著减少 decode 计算；且**模型越大、序列越长，收益越显著**（0.5M → 40.7M 参数：1.35x → 3.03x；attention 计算从 O(T²) 降到 O(T)）。
 
+### TTFT / TPOT 基准（`bench_inference.py`）
+
+用业界对标的两个指标测 KV Cache 收益随上下文长度的变化（CPU，40.7M 参数，贪心解码，3 次取中位数）：
+
+| prompt 长度 | TTFT (ms) | TPOT cache (ms/tok) | TPOT 全量重算 (ms/tok) | decode 加速 |
+|---|---|---|---|---|
+| 32 | 20.9 | 14.31 | 23.46 | 1.64x |
+| 64 | 30.1 | 14.24 | 30.46 | 2.14x |
+| 128 | 50.1 | 14.12 | 45.33 | 3.21x |
+| 192 | 53.7 | **13.71** | 57.20 | **4.17x** |
+
+- **TPOT 是常数**（~14 ms/token，与上下文长度无关）——decode 每步只算 1 个 token，复杂度 O(1)
+- **全量重算的 TPOT 线性增长**（23 → 57 ms/token）——每步重算全部历史，复杂度 O(T)
+- 所以加速比随上下文增长（1.64x → 4.17x）：**上下文越长，KV Cache 越关键**
+- KV Cache 占用：**32 KB/token**（2 × 8 层 × 4 KV 头 × 128 head_dim × 2 字节 fp16），seq=256 时 8 MB/序列
+
+```bash
+python bench_inference.py --source sft --model-tag d8 --contexts 32,64,128,192 --max-new 32
+```
+
+
 ## 扩展点（本项目增量）
 
 - `nanochat/dataloader.py`：`txt_to_docs`（line_mode 按行切）+ `_text_document_batches`（本地文本数据迭代）
@@ -93,6 +114,7 @@ python -m scripts.mini_engine --source base --model-tag d8 --compare --compare-t
 - `local_eval.py`：bpb 评估 + 对话测试
 - `build_sft_data.py`：从 cnews 语料派生多任务对话数据（分类/概括/续写）
 - `sft_eval.py`：SFT 效果评测（新闻分类准确率）
+- `bench_inference.py`：TTFT/TPOT 推理性能基准（KV Cache vs 全量重算）
 
 ## 质量提升实验
 
