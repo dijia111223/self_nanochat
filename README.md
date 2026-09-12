@@ -12,30 +12,47 @@
 
 ## 快速开始（本地模式）
 
+> 下面是**实测跑通**的完整命令（CPU，40.7M 模型）。每一步的参数都别省，尤其 `--max-seq-len`。
+
 ```bash
 # 1. 环境
-pip install rustbpe tiktoken pyarrow wandb torch
+pip install rustbpe tiktoken pyarrow wandb torch transformers
 export NANOCHAT_LOCAL=1       # Windows: $env:NANOCHAT_LOCAL="1"
 export PYTHONUTF8=1           # Windows 中文编码
 
 # 2. 训练分词器（本地文本）
-python -m scripts.tok_train --max-chars=100000 --vocab-size=1000
+python -m scripts.tok_train --text-path=cnews_small.txt --max-chars=5000000 --vocab-size=5000
 
-# 3. 预训练（本地 txt）
-python -m scripts.base_train --depth=2 --max-seq-len=128 --device-batch-size=1 \
-  --total-batch-size=128 --num-iterations=500 --run=dummy --text-path=your_news.txt \
-  --window-pattern L --eval-every -1 --core-metric-every -1 --sample-every -1 --save-every -1
+# 3. 预训练（--max-seq-len 必须和模型/SFT 一致，否则会被默认值 2048 坑）
+python -m scripts.base_train --model-tag d8 --depth 8 --max-seq-len 256 \
+  --text-path=cnews.train.txt --num-iterations=1500 \
+  --device-batch-size 1 --total-batch-size 256 --eval-every 750 --run dummy
 
-# 4. SFT 对话微调（本地对话 jsonl，OpenAI 格式）
-python -m scripts.chat_sft --model-tag d2 --num-iterations=200 --device-batch-size=1 \
-  --total-batch-size=128 --run=dummy --text-path=your_chat.jsonl --eval-every -1 --chatcore-every -1
+# 4. 从带标签语料派生 SFT 对话数据（分类/概括/续写 + 人格）
+python build_sft_data.py --text-path cnews.train.txt --out local_chat_v7.jsonl \
+  --cls-ratio 0.6 --sum-ratio 0.2 --identity-copies 30
 
-# 5. 评估（bpb + 对话测试）
-python local_eval.py --model-tag d2 --text-path=your_news.txt
+# 5. SFT 对话微调
+python -m scripts.chat_sft --model-tag d8 --max-seq-len 256 --text-path=local_chat_v7.jsonl \
+  --num-iterations=600 --device-batch-size=1 --total-batch-size=256 \
+  --eval-every -1 --chatcore-every -1 --eval-tokens 2048 --run=dummy
 
-# 6. 对话
-python -m scripts.chat_cli --model-tag d2
+# 6. 评测：任务准确率 / 推理性能 / 对话（--engine mini 用自研推理引擎）
+python sft_eval.py --source sft --model-tag d8 --num-samples 1000 --show 0
+python bench_inference.py --source sft --model-tag d8 --contexts 32,64,128,192 --max-new 32
+python -m scripts.chat_cli -i sft -g d8 --device-type cpu --engine mini -p "下面这条新闻属于什么类别？只回答类别。`n..."
+
+# 7. 对标真实模型（同一套 TTFT/TPOT 方法）
+python bench_hf.py --model Qwen/Qwen2.5-0.5B-Instruct --contexts 32,64,128 --max-new 8
 ```
+
+### 三个必知的坑
+
+| 坑 | 症状 | 解法 |
+|---|---|---|
+| `--max-seq-len` 默认 2048 | `AssertionError: total_batch_size (256) must be a multiple of 2048` | 显式传 `--max-seq-len 256`（chat_sft 续训时已加兜底） |
+| `--eval-tokens` 默认 40×524288 | CPU 上 `eval_steps≈8.2 万`，评估要跑几十小时 → 像"卡死" | LOCAL_MODE 下已在代码里截断为 8 步 |
+| 日志块缓冲（8KB） | 日志停在某一步不动，进程其实在跑 | **"日志不动 ≠ 进程不动"**；怀疑卡死先 `py-spy dump --pid <pid>` 抓栈 |
 
 ## 数据格式
 
