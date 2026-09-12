@@ -1,39 +1,31 @@
 # -*- coding: utf-8 -*-
 """
-mini_engine.py —— 从零实现的 KV Cache 推理引擎（库模块）
+KV Cache 推理引擎。
 
-与 nanochat 自带 `nanochat.engine.Engine` **接口兼容**，可直接替换使用：
+与 nanochat.engine.Engine 接口兼容，可直接替换：
 
-    # 原版
-    from nanochat.engine import Engine
-    engine = Engine(model, tokenizer)
-
-    # 本实现（同样的调用方式）
     from nanochat.mini_engine import MiniEngine
     engine = MiniEngine(model, tokenizer)
-
-    for token_column, token_masks in engine.generate(tokens, num_samples=1,
-                                                      max_tokens=256,
-                                                      temperature=0.8, top_k=None):
+    for token_column, token_masks in engine.generate(tokens, num_samples=1, max_tokens=256):
         ...
 
 兼容接口：
-    - generate(tokens, num_samples=1, max_tokens=256, temperature=1.0, top_k=None, seed=42)
-        流式生成器，每步 yield (token_column, token_masks)：长度均为 num_samples
-    - generate_batch(tokens, num_samples=1, **kwargs)
-        非流式，返回 (results, masks)；终止 token（assistant_end / bos）不计入结果
+    generate(tokens, num_samples=1, max_tokens=256, temperature=1.0, top_k=None, seed=42)
+        流式生成，每步 yield (token_column, token_masks)，长度均为 num_samples
+    generate_batch(tokens, num_samples=1, **kwargs)
+        非流式，返回 (results, masks)，终止 token（assistant_end / bos）不计入结果
 
-额外提供（用于对照与实验）：
-    - generate_cached(...)  单样本、带 KV Cache 的增量解码（prefill + decode，逻辑最清晰）
-    - generate_naive(...)   朴素生成：每步喂全部历史、重算 K/V（对照实现）
-    - compare(...)          cache vs naive：正确性（贪心逐 token 一致）+ prefill/decode 耗时
-    - chat(prompt, ...)     对话（渲染 prompt → 生成 → 解码）
+附加接口：
+    generate_cached(...)  单样本增量解码（prefill + decode）
+    generate_naive(...)   朴素生成，每步重算全部历史，作为对照实现
+    compare(...)          cache 与 naive 的正确性校验 + prefill/decode 耗时对比
+    chat(prompt, ...)     对话生成
 
-实现要点：
-    1. prefill：prompt 的 K/V 一次算完写入 KV Cache
-    2. decode ：每步只喂 1 个新 token，历史 K/V 从 cache 复用（不重算）
-    3. GQA：cache 的 KV 头数取 config.n_kv_head（可与 Q 头数不同）
-    4. 位置编码：由模型内部按 cache 位置（cache.get_pos()）取 RoPE，天然是绝对位置
+实现说明：
+    1. prefill 阶段一次性计算 prompt 的 K/V 并写入 cache
+    2. decode 阶段每步只输入 1 个新 token，历史 K/V 复用 cache
+    3. cache 的 KV 头数取 config.n_kv_head，支持 GQA
+    4. 位置编码由模型内部依据 cache 位置（cache.get_pos()）选取 RoPE
 """
 
 import time
@@ -69,14 +61,13 @@ class MiniEngine:
         }
 
     # ==================================================================
-    # 兼容接口 ①：流式生成（对应 Engine.generate）
+    # 流式生成（与 Engine.generate 兼容）
     # ==================================================================
     def generate(self, tokens, num_samples=1, max_tokens=256, temperature=1.0, top_k=None, seed=42):
         """
-        流式生成：每步 yield (token_column, token_masks)
-            token_column: list[int]，长度 = num_samples（每个样本当前步的 token）
-            token_masks : list[int]，长度 = num_samples（1 = 生成部分）
-        与 nanochat Engine.generate 接口兼容，chat_cli 等脚本可直接切换使用。
+        流式生成，每步 yield (token_column, token_masks)
+            token_column: list[int]，长度 = num_samples，每个样本当前步的 token
+            token_masks : list[int]，长度 = num_samples，1 表示生成部分
         """
         self.model.eval()
         tokens = list(tokens)
@@ -114,7 +105,7 @@ class MiniEngine:
                 logits = self.model.forward(x, kv_cache=cache)
 
     # ==================================================================
-    # 兼容接口 ②：非流式批量生成（对应 Engine.generate_batch）
+    # 非流式批量生成（与 Engine.generate_batch 兼容）
     # ==================================================================
     def generate_batch(self, tokens, num_samples=1, **kwargs):
         """返回 (results, masks)；终止 token（assistant_end / bos）不计入结果。"""
@@ -134,7 +125,7 @@ class MiniEngine:
         return results, masks
 
     # ==================================================================
-    # 单样本、带 KV Cache 的增量解码（逻辑最清晰，用于阅读与对比实验）
+    # 单样本增量解码（prefill + decode）
     # ==================================================================
     def generate_cached(self, tokens, max_new=50, temperature=0.0, top_k=None,
                         seed=42, stop_at_end=True):
@@ -170,7 +161,7 @@ class MiniEngine:
         return out
 
     # ==================================================================
-    # 对照实现：朴素生成（无 cache，每步喂全部历史 → 重算 K/V）
+    # 朴素生成（无 cache，每步输入全部历史并重算 K/V），作为对照实现
     # ==================================================================
     def generate_naive(self, tokens, max_new=50, temperature=0.0, top_k=None,
                        seed=42, stop_at_end=True):
@@ -216,7 +207,7 @@ class MiniEngine:
             tokens = tokens[-(self.max_seq_len - 1):]
         cache_len = max(min(len(tokens) + max_new, self.max_seq_len), len(tokens))
 
-        # ① cache 版：prefill + decode
+        # cache 版：prefill + decode
         cache = KVCache(batch_size=1, seq_len=cache_len, device=self.device,
                         dtype=COMPUTE_DTYPE, **self.kv_kwargs)
         with torch.no_grad():
@@ -238,7 +229,7 @@ class MiniEngine:
                 n_steps += 1
             t_decode = time.time() - t0
 
-        # ② naive 版：每步全量重算
+        # naive 版：每步全量重算
         with torch.no_grad():
             out_naive = list(tokens)
             t0 = time.time()
@@ -262,7 +253,7 @@ class MiniEngine:
         print("=" * 58)
         print(f"prompt tokens      : {len(tokens)}")
         print(f"新生成 tokens      : {n_steps}")
-        print(f"结果一致           : {same}   ← 正确性：cache 不改变结果")
+        print(f"结果一致           : {same}   （正确性：cache 不改变结果）")
         print("-" * 58)
         print(f"[cache 版] prefill : {t_prefill * 1000:.1f} ms（prompt 一次算完）")
         print(f"[cache 版] decode  : {t_decode * 1000:.1f} ms / {n_steps} 步 = {ms_cache:.2f} ms/步"
@@ -272,7 +263,7 @@ class MiniEngine:
         print("-" * 58)
         print(f"总耗时：cache {total_cache * 1000:.1f} ms  vs  naive {t_naive * 1000:.1f} ms"
               f"  →  {t_naive / max(1e-9, total_cache):.2f}x")
-        print(f"decode 单步加速比  : {ms_naive / max(1e-9, ms_cache):.2f}x  ← KV Cache 的核心收益")
+        print(f"decode 单步加速比  : {ms_naive / max(1e-9, ms_cache):.2f}x  （KV Cache 的核心收益）")
         print("=" * 58)
         return {"same": same, "t_prefill": t_prefill, "t_decode": t_decode,
                 "t_naive": t_naive, "ms_cache": ms_cache, "ms_naive": ms_naive}

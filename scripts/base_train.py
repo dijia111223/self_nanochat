@@ -76,8 +76,7 @@ parser.add_argument("--core-metric-max-per-task", type=int, default=500, help="e
 parser.add_argument("--sample-every", type=int, default=2000, help="sample from model every N steps (-1 = disable)")
 parser.add_argument("--save-every", type=int, default=-1, help="save checkpoints every N steps (-1 = only at end)")
 # Output
-# --text-path 默认值：LOCAL_MODE 开启时自动用本地数据（未指定时提示）
-parser.add_argument("--text-path", type=str, default=None, help="local text file/dir for training (bypasses parquet). LOCAL_MODE=1 时自动启用")
+parser.add_argument("--text-path", type=str, default=None, help="local text file or dir for training (bypasses parquet)")
 parser.add_argument("--model-tag", type=str, default=None, help="override model tag for checkpoint directory name")
 args = parser.parse_args()
 user_config = vars(args).copy()  # for logging
@@ -335,7 +334,7 @@ if scaler is not None:
 # Initialize the DataLoaders for train/val
 dataloader_resume_state_dict = None if not resuming else meta_data["dataloader_state_dict"]
 if args.text_path is None and LOCAL_MODE:
-    print0("⚠️ LOCAL_MODE=1 但未指定 --text-path，请指定本地数据文件")
+    print0("[WARN] LOCAL_MODE=1 但未指定 --text-path，请指定本地数据目录")
 
 # 本地模式：训练前检查数据量是否足够（避免训练中途数据耗尽卡死）
 if args.text_path is not None and args.num_iterations > 0 and args.total_batch_size:
@@ -345,9 +344,9 @@ if args.text_path is not None and args.num_iterations > 0 and args.total_batch_s
     print0(f"[数据检查] 本地数据 ≈ {est_tokens:,} tokens（{n_docs:,} 个文档），"
            f"训练需要 ≈ {need_tokens:,} tokens")
     if est_tokens < need_tokens:
-        print0(f"⚠️  警告：数据量不足！建议 --num-iterations ≤ "
+        print0(f"[WARN] 数据量不足，建议 --num-iterations <= "
                f"{est_tokens // max(1, args.total_batch_size)}，或将数据扩充约 "
-               f"{need_tokens / max(1, est_tokens):.1f} 倍（否则训练中途会卡在数据耗尽处）")
+               f"{need_tokens / max(1, est_tokens):.1f} 倍（否则训练中途会因数据耗尽卡住）")
 
 train_loader = tokenizing_distributed_data_loader_with_state_bos_bestfit(tokenizer, args.device_batch_size, args.max_seq_len, split="train", device=device, resume_state_dict=dataloader_resume_state_dict, text_path=args.text_path)
 build_val_loader = lambda: tokenizing_distributed_data_loader_bos_bestfit(tokenizer, args.device_batch_size, args.max_seq_len, split="val", device=device, text_path=args.text_path)

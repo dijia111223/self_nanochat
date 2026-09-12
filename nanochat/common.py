@@ -31,8 +31,7 @@ def _detect_compute_dtype():
     # Note: MPS on recent macOS also handles bf16 fine, opt in via NANOCHAT_DTYPE=bfloat16
     return torch.float32, "auto-detected: no CUDA (CPU/MPS)"
 COMPUTE_DTYPE, COMPUTE_DTYPE_REASON = _detect_compute_dtype()
-# 本地模式开关：NANOCHAT_LOCAL=1 时，训练/微调默认走本地数据（bypass parquet/HF）
-    # 用法：$env:NANOCHAT_LOCAL = "1"  （或 export NANOCHAT_LOCAL=1）
+# 本地模式开关：NANOCHAT_LOCAL=1 时使用本地数据（跳过云端数据集下载）
 LOCAL_MODE = os.environ.get("NANOCHAT_LOCAL", "0") == "1"
 
 class ColoredFormatter(logging.Formatter):

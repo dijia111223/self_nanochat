@@ -18,7 +18,7 @@ parser = argparse.ArgumentParser(description='Train a BPE tokenizer')
 parser.add_argument('--max-chars', type=int, default=2_000_000_000, help='Maximum characters to train on (default: 2B)')
 parser.add_argument('--doc-cap', type=int, default=10_000, help='Maximum characters per document (default: 10,000)')
 parser.add_argument('--vocab-size', type=int, default=32768, help='Vocabulary size (default: 32768 = 2^15)')
-parser.add_argument('--text-path', type=str, default=None, help='本地文本文件/目录（custom extension，绕开 parquet 下载）')
+parser.add_argument('--text-path', type=str, default=None, help='本地文本文件或目录（使用本地数据，跳过 parquet 下载）')
 args = parser.parse_args()
 print(f"max_chars: {args.max_chars:,}")
 print(f"doc_cap: {args.doc_cap:,}")
@@ -29,7 +29,7 @@ print(f"text_path: {args.text_path}")
 # Text iterator
 
 def text_iterator():
-    """文本迭代器：指定 --text-path 时读本地文本（txt/jsonl 目录），否则走原 parquet 逻辑"""
+    """文本迭代器：指定 --text-path 时使用本地文本，否则读取 parquet 数据集"""
     nchars = 0
     if args.text_path is not None:
         for fp in list_text_files(args.text_path):

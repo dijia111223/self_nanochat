@@ -70,7 +70,6 @@ def _document_batches(split, resume_state_dict, tokenizer_batch_size):
             pq_idx += 1
         first_pass = False
         epoch += 1
-"""添加本地文本训练功能"""
 def list_text_files(data_dir=None):
     """返回本地文本文件"""
     if data_dir is None:
@@ -120,12 +119,8 @@ def txt_to_docs(text, doc_max_char=None, line_mode=True):
 
 
 def estimate_local_text_tokens(text_path, tokenizer, sample_docs=100, doc_max_char=10000):
-    """
-    估算本地文本数据集的 token 总量（采样前 sample_docs 个文档，再按文档总数外推）。
-
-    用途：训练前检查"数据量 vs 训练步数"，避免训练中途数据耗尽导致卡死。
-    返回 (估算总 tokens, 文档总数)
-    """
+    """估算本地文本数据集的 token 总量（采样若干文档后按文档总数外推），用于训练前数据量检查。
+    返回 (估算总 tokens, 文档总数)。"""
     total_docs = 0
     sampled_tokens = 0
     sampled_docs = 0

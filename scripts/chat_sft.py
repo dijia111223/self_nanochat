@@ -64,7 +64,7 @@ parser.add_argument("--chatcore-max-sample", type=int, default=24, help="max pro
 # Data mixture
 parser.add_argument("--mmlu-epochs", type=int, default=3, help="number of epochs of MMLU in training mixture (teaches Multiple Choice)")
 parser.add_argument("--gsm8k-epochs", type=int, default=4, help="number of epochs of GSM8K in training mixture (teaches Math and Tool Use)")
-parser.add_argument("--text-path", type=str, default=None, help="local chat jsonl/txt for SFT (custom extension, bypasses task datasets)")
+parser.add_argument("--text-path", type=str, default=None, help="local chat jsonl/txt for SFT (bypasses task datasets)")
 args = parser.parse_args()
 user_config = vars(args).copy()
 # -----------------------------------------------------------------------------
@@ -210,9 +210,9 @@ if args.text_path is not None:
         print0(f"[数据检查] 对话数据 ≈ {_est:,} tokens（{len(train_dataset):,} 条，"
                f"平均 {_avg:.1f} tokens/条），训练需要 ≈ {_need:,} tokens")
         if _est < _need:
-            print0(f"⚠️  警告：数据量不足！建议 --num-iterations ≤ "
+            print0(f"[WARN] 数据量不足，建议 --num-iterations <= "
                    f"{_est // max(1, args.total_batch_size)}，或将数据重复约 "
-                   f"{_need / max(1, _est):.1f} 倍（否则训练中途会卡在数据耗尽处）")
+                   f"{_need / max(1, _est):.1f} 倍（否则训练中途会因数据耗尽卡住）")
 else:
     train_tasks = [
         SmolTalk(split="train"),

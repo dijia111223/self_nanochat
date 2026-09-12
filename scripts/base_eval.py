@@ -135,7 +135,7 @@ def main():
     parser.add_argument('--split-tokens', type=int, default=40*524288, help='Number of tokens to evaluate per split for BPB')
     parser.add_argument('--device-type', type=str, default='', help='cuda|cpu|mps (empty = autodetect)')
     
-    parser.add_argument("--text-path", type=str, default=None, help="local text file/dir for evaluation (custom extension, bypasses parquet)")
+    parser.add_argument("--text-path", type=str, default=None, help="local text file or dir for evaluation (bypasses parquet)")
     args = parser.parse_args()
 
     # Parse evaluation modes

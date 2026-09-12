@@ -12,15 +12,13 @@ from nanochat.tokenizer import get_tokenizer
 def evaluate_bpb(model, tokenizer, text_path, max_tokens=16384):
     with open(text_path, encoding='utf-8') as f:
         text = f.read()
-    # tokenize
     tokens = tokenizer.encode([text[:max_tokens]], prepend=tokenizer.get_bos_token_id())[0]
-    tokens = tokens[:1280]
-    # 模型前向算 loss
+    tokens = tokens[:1280]          # 截断到模型支持的最大序列长度
     x = torch.tensor([tokens[:-1]], device='cpu')
     y = torch.tensor([tokens[1:]], device='cpu')
     with torch.no_grad():
-        loss = model(x, targets=y)   # 模型返回 loss
-    bpb = loss.item() / 0.6931   # loss / ln(2)
+        loss = model(x, targets=y)  # GPT.forward 传入 targets 时返回 loss
+    bpb = loss.item() / 0.6931      # loss / ln(2)
     print(f'bpb: {bpb:.4f}')
 
 def test_dialogue(model, tokenizer, questions):
@@ -50,12 +48,12 @@ def main():
 
     print(f'===== 评估模型: {args.model_tag} =====')
 
-    # ① bpb 评估
+    # bpb 评估
     if args.text_path:
         print('--- bpb 评估 ---')
         evaluate_bpb(model, tokenizer, args.text_path, args.split_tokens)
 
-    # ② 对话测试
+    # 对话测试
     print('--- 对话测试 ---')
     test_dialogue(model, tokenizer, ['你好', '什么是机器学习', '1加1等于几', '什么是Transformer'])
 
