@@ -94,18 +94,43 @@ python -m scripts.chat_sft --model-tag d8p --init-source sft --init-tag d8 `
 python bench_inference.py --source sft --model-tag d8 --contexts 32,64,128,192 --max-new 32
 ```
 
-## 实验 5：预训练数据扩容（进行中）
+## 实验 5：预训练数据扩容
 
 基座 d8 只训了 500 步（12.8 万 token）且语料是**单一体育类**（cnews_small.txt 5000 条全是"体育"）。
 把语料换成 10 类 4.3 万条（cnews.train.txt，约 3100 万 token），步数提到 1500（38.4 万 token）：
+
+| | 老基座 d8 | 新基座 d8m |
+|---|---|---|
+| 语料 | 5000 篇 / **全是体育** | 43,245 篇 / 10 类 |
+| 步数 / token | 500 / 12.8 万 | 1500 / **38.4 万** |
+| 训练 loss | 8.52 → 7.21 | 8.53 → **约 6.0** |
+| val bpb | 未测 | **1.98** |
+
+两个基座各自在同一份 v7 SFT 数据上训 600 步：
+
+| 基座 | SFT val bpb | 分类准确率（200 条） |
+|---|---|---|
+| d8 | — | 58.5% |
+| **d8m** | 3.0877 | **59.5%** |
+
+d8m 分类别准确率：娱乐 100% / 财经 86% / 体育 85% / 时尚 84% / 房产 65% / 游戏 62% / 科技 53% / 时政 41% / **家居 0% / 教育 0%**
+
+**结论**：
+- 预训练数据 3 倍扩容 + 从单一类目扩到 10 类，对分类准确率只带来 **+1 个点**（200 条样本的标准误约 3.5%，**在噪声范围内**）
+- 对照：SFT 数据从"49 种对话重复 240 次"换成"3 万条多任务"是 **+52 个点**
+- 所以在这个规模下，**判别类能力主要由 SFT 监督信号决定，预训练数据量不是瓶颈**（至少在 12.8 万 → 38.4 万 token 区间）
+- **基座 bpb 从 7.2 降到 1.98，但没有转化成生成质量**：概括任务仍然退化成重复循环（`(记者 (记者 (记者…`）——瓶颈在模型容量（40M）与训练量级，不在数据
 
 ```powershell
 python -m scripts.base_train --model-tag d8m --depth 8 --max-seq-len 256 `
     --text-path cnews.train.txt --num-iterations 1500 `
     --device-batch-size 1 --total-batch-size 256 --eval-every 750 --run dummy
+python -m scripts.chat_sft --model-tag d8m --max-seq-len 256 --text-path local_chat_v7.jsonl `
+    --num-iterations 600 --device-batch-size 1 --total-batch-size 256 `
+    --eval-every -1 --chatcore-every -1 --eval-tokens 2048 --run dummy
+python sft_eval.py --source sft --model-tag d8m --num-samples 1000
 ```
 
-对比目标：SFT 后分类准确率能否超过 d8r 的 63.0%。
 
 ---
 
