@@ -442,6 +442,9 @@ while True:
         model.eval()
         val_loader = build_val_loader()
         eval_steps = args.eval_tokens // (args.device_batch_size * args.max_seq_len * ddp_world_size)
+        if LOCAL_MODE:
+            # --eval-tokens 默认值针对 GPU 集群，本地 CPU 全量评估需数十小时，这里截断步数
+            eval_steps = min(eval_steps, 8)
         with disable_fp8(model):
             val_bpb = evaluate_bpb(model, val_loader, eval_steps, token_bytes)
         print0(f"Step {step:05d} | Validation bpb: {val_bpb:.6f}")
