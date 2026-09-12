@@ -90,12 +90,15 @@ while True:
         "top_k": args.top_k,
     }
     response_tokens = []
+    printed = ""
     print("\nAssistant: ", end="", flush=True)
     for token_column, token_masks in engine.generate(conversation_tokens, **generate_kwargs):
         token = token_column[0] # pop the batch dimension (num_samples=1)
         response_tokens.append(token)
-        token_text = tokenizer.decode([token])
-        print(token_text, end="", flush=True)
+        # 汉字可能被切在多个 token 上，逐 token 解码会出现乱码，这里解码整段只打印新增部分
+        text = tokenizer.decode(response_tokens)
+        print(text[len(printed):], end="", flush=True)
+        printed = text
     print()
     # we have to ensure that the assistant end token is the last token
     # so even if generation ends due to max tokens, we have to append it to the end
