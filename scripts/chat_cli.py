@@ -18,6 +18,8 @@ parser.add_argument('-p', '--prompt', type=str, default='', help='Prompt the mod
 parser.add_argument('-t', '--temperature', type=float, default=0.6, help='Temperature for generation')
 parser.add_argument('-k', '--top-k', type=int, default=50, help='Top-k sampling parameter')
 parser.add_argument('--device-type', type=str, default='', choices=['cuda', 'cpu', 'mps'], help='Device type for evaluation: cuda|cpu|mps. empty => autodetect')
+parser.add_argument('--engine', type=str, default='nanochat', choices=['nanochat', 'mini'],
+                    help='推理引擎：nanochat（框架自带）| mini（本项目从零实现的 KV Cache 引擎，接口兼容）')
 args = parser.parse_args()
 
 # Init the model and tokenizer
@@ -32,7 +34,13 @@ user_start, user_end = tokenizer.encode_special("<|user_start|>"), tokenizer.enc
 assistant_start, assistant_end = tokenizer.encode_special("<|assistant_start|>"), tokenizer.encode_special("<|assistant_end|>")
 
 # Create Engine for efficient generation
-engine = Engine(model, tokenizer)
+if args.engine == 'mini':
+    # 本项目从零实现的 KV Cache 推理引擎（与 Engine 接口兼容，可直接替换）
+    from nanochat.mini_engine import MiniEngine
+    engine = MiniEngine(model, tokenizer)
+    print(f"Using MiniEngine (custom KV Cache inference engine), device={engine.device}")
+else:
+    engine = Engine(model, tokenizer)
 
 print("\nNanoChat Interactive Mode")
 print("-" * 50)

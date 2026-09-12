@@ -9,6 +9,7 @@ import torch
 from nanochat.tokenizer import RustBPETokenizer
 from nanochat.common import get_base_dir
 from nanochat.dataset import parquets_iter_batched
+from nanochat.dataloader import list_text_files, txt_to_docs
 
 # -----------------------------------------------------------------------------
 # Parse command line arguments
@@ -17,27 +18,39 @@ parser = argparse.ArgumentParser(description='Train a BPE tokenizer')
 parser.add_argument('--max-chars', type=int, default=2_000_000_000, help='Maximum characters to train on (default: 2B)')
 parser.add_argument('--doc-cap', type=int, default=10_000, help='Maximum characters per document (default: 10,000)')
 parser.add_argument('--vocab-size', type=int, default=32768, help='Vocabulary size (default: 32768 = 2^15)')
+parser.add_argument('--text-path', type=str, default=None, help='本地文本文件/目录（custom extension，绕开 parquet 下载）')
 args = parser.parse_args()
 print(f"max_chars: {args.max_chars:,}")
 print(f"doc_cap: {args.doc_cap:,}")
 print(f"vocab_size: {args.vocab_size:,}")
+print(f"text_path: {args.text_path}")
 
 # -----------------------------------------------------------------------------
 # Text iterator
 
 def text_iterator():
-    """改：读本地小文本，绕开 400B 数据集下载"""
+    """文本迭代器：指定 --text-path 时读本地文本（txt/jsonl 目录），否则走原 parquet 逻辑"""
     nchars = 0
-    # 从本地文件读文本（你造一个 test.txt）
-    with open("test.txt", "r", encoding="utf-8") as f:
-        text = f.read()
-    # 按 doc_cap 切成文档
-    for i in range(0, len(text), args.doc_cap):
-        doc_text = text[i:i+args.doc_cap]
-        nchars += len(doc_text)
-        yield doc_text
-        if nchars > args.max_chars:
-            return
+    if args.text_path is not None:
+        for fp in list_text_files(args.text_path):
+            with open(fp, "r", encoding="utf-8") as f:
+                text = f.read()
+            for doc in txt_to_docs(text, args.doc_cap):
+                nchars += len(doc)
+                yield doc
+                if nchars > args.max_chars:
+                    return
+        return
+    # 原逻辑：云端 parquet 数据集
+    for batch in parquets_iter_batched(split="train"):
+        for doc in batch:
+            doc_text = doc
+            if len(doc_text) > args.doc_cap:
+                doc_text = doc_text[:args.doc_cap]
+            nchars += len(doc_text)
+            yield doc_text
+            if nchars > args.max_chars:
+                return
 text_iter = text_iterator()
 
 # -----------------------------------------------------------------------------

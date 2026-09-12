@@ -21,3 +21,6 @@ test.txt
 cnews_data/
 .claude/
 .ipynb_checkpoints/
+
+*.log
+*.jsonl

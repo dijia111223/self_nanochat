@@ -196,6 +196,23 @@ if args.text_path is not None:
     train_dataset = LocalChatDataset(args.text_path)
     val_dataset = LocalChatDataset(args.text_path)
     print0(f"本地对话数据: {len(train_dataset)} 条")
+
+    # 训练前数据量检查（避免训练中途数据耗尽卡死）
+    if args.num_iterations > 0 and args.total_batch_size:
+        _sn = min(200, len(train_dataset))
+        _tok = 0
+        for _i in range(_sn):
+            _ids, _ = tokenizer.render_conversation(train_dataset[_i])
+            _tok += len(_ids)
+        _avg = _tok / max(1, _sn)
+        _est = int(_avg * len(train_dataset))
+        _need = args.num_iterations * args.total_batch_size
+        print0(f"[数据检查] 对话数据 ≈ {_est:,} tokens（{len(train_dataset):,} 条，"
+               f"平均 {_avg:.1f} tokens/条），训练需要 ≈ {_need:,} tokens")
+        if _est < _need:
+            print0(f"⚠️  警告：数据量不足！建议 --num-iterations ≤ "
+                   f"{_est // max(1, args.total_batch_size)}，或将数据重复约 "
+                   f"{_need / max(1, _est):.1f} 倍（否则训练中途会卡在数据耗尽处）")
 else:
     train_tasks = [
         SmolTalk(split="train"),

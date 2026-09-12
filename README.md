@@ -52,43 +52,55 @@ python -m scripts.chat_cli --model-tag d2
 | **本地** | `NANOCHAT_LOCAL=1` | 本地 txt/jsonl | 禁用 |
 | **云端** | 默认（不设） | HF parquet / 任务数据集 | 可用（需 H100） |
 
-## 从零实现的推理引擎（mini_engine.py）
+## 从零实现的推理引擎（nanochat/mini_engine.py）
 
-不依赖 nanochat 的 `engine.py`，自己实现 **KV Cache 增量解码**（prefill + decode 两阶段）：
+与框架自带 `nanochat.engine.Engine` **接口兼容**（`generate` / `generate_batch` 签名一致），
+可直接替换使用，也支持一键切换：
 
 ```bash
-# 对话生成（带 KV Cache）
-python mini_engine.py --model-tag d2 --prompt "你好" --max-new 20
+# 用自己的引擎对话（--engine mini）
+python -m scripts.chat_cli --engine mini --model-tag d8
 
-# 对比实验：cache vs naive（无 cache，每步重算全部历史）
-python mini_engine.py --model-tag d2 --compare --compare-tokens 8 --max-new 110
+# 独立入口：对话 / 对比实验
+python -m scripts.mini_engine --source base --model-tag d8 --prompt "人工智能" --max-new 30
+python -m scripts.mini_engine --source base --model-tag d8 --compare --compare-tokens 96 --max-new 32
 ```
 
 **实现要点**：
 - **prefill**：prompt 的 K/V 一次算完，写入 KV Cache
 - **decode**：每步**只喂 1 个新 token**，历史 K/V 从 cache 复用（不重算）
 - **GQA 支持**：cache 的 KV 头数取 `n_kv_head`（可与 Q 头数不同）
-- **正确性验证**：与朴素实现（每步全量重算）贪心解码结果**完全一致**
+- **batch 采样**：`generate` 支持 `num_samples`，流式 yield `(token_column, token_masks)`
+- **正确性验证**：与朴素实现（每步全量重算）贪心解码**逐 token 一致**
 
-**实测（CPU，depth=2 小模型，prompt 9 + 生成 110 tokens）**：
+**实测（CPU，贪心解码）**：
 
-| 指标 | 结果 |
-|---|---|
-| 结果一致 | ✅ True（cache 不改变结果） |
-| prefill | 4.1 ms |
-| cache decode | 1.57 ms/步（每步只算 1 个 token） |
-| naive 每步 | 2.12 ms/步（每步重算全部历史） |
-| decode 单步加速 | **1.35x** |
+| 模型 | prompt + 生成 | 结果一致 | prefill | cache decode | naive 每步 | **decode 加速** |
+|---|---|---|---|---|---|---|
+| d2（0.5M 参数） | 9 + 110 | ✅ True | 4.1 ms | 1.57 ms/步 | 2.12 ms/步 | 1.35x |
+| **d8（40.7M 参数）** | 96 + 32 | ✅ True | 26.0 ms | 10.35 ms/步 | 31.39 ms/步 | **3.03x** |
 
-> 注：小模型 + 短序列时收益有限（框架固定开销占主导）；**序列越长、模型越大，KV Cache 收益越显著**（attention 计算从 O(T²) 降到 O(T)）。
+> **结论**：KV Cache 不改变结果（正确性验证通过），但显著减少 decode 计算；且**模型越大、序列越长，收益越显著**（0.5M → 40.7M 参数：1.35x → 3.03x；attention 计算从 O(T²) 降到 O(T)）。
 
 ## 扩展点（本项目增量）
 
 - `nanochat/dataloader.py`：`txt_to_docs`（line_mode 按行切）+ `_text_document_batches`（本地文本数据迭代）
 - `scripts/chat_sft.py`：`--text-path` + `LocalChatDataset`（本地对话数据）
+- `scripts/tok_train.py`：`--text-path`（本地文本训 tokenizer）
 - `nanochat/common.py`：`LOCAL_MODE` 双模式开关
+- `nanochat/mini_engine.py`：从零实现的 KV Cache 推理引擎（接口兼容 + prefill/decode + 对比实验）
+- `scripts/chat_cli.py`：`--engine nanochat|mini` 引擎切换
 - `local_eval.py`：bpb 评估 + 对话测试
-- `mini_engine.py`：从零实现的 KV Cache 推理引擎（prefill/decode + 对比实验）
+
+## 质量提升实验（tokenizer / 模型规模）
+
+| 配置 | vocab | 参数量 | 中文生成 | decode 加速 |
+|---|---|---|---|---|
+| 初始 | 1000 | 0.5M | ❌ 乱码（字节碎片） | 1.35x |
+| **提升后** | **5000** | **40.7M** | ✅ **可读中文**（真实新闻语言） | **3.03x** |
+
+- **tokenizer vocab 1000 → 5000**：中文从"字节级碎片"变为"字/词级"切分（`你好！很高兴见到你` 从 50+ 碎片 → 14 个词级 token），decode 完全可读
+- **模型 depth 2 → 8**（0.5M → 40.7M 参数）：可学习真实的新闻语言模式；KV Cache 收益同时从 1.35x 提升到 3.03x
 
 ## 文档
 

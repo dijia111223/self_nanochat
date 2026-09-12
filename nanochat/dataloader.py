@@ -117,6 +117,34 @@ def txt_to_docs(text, doc_max_char=None, line_mode=True):
         else:
             docs.append(doc)
     return docs
+
+
+def estimate_local_text_tokens(text_path, tokenizer, sample_docs=100, doc_max_char=10000):
+    """
+    估算本地文本数据集的 token 总量（采样前 sample_docs 个文档，再按文档总数外推）。
+
+    用途：训练前检查"数据量 vs 训练步数"，避免训练中途数据耗尽导致卡死。
+    返回 (估算总 tokens, 文档总数)
+    """
+    total_docs = 0
+    sampled_tokens = 0
+    sampled_docs = 0
+    for fp in list_text_files(text_path):
+        with open(fp, "r", encoding="utf-8") as f:
+            text = f.read()
+        docs = txt_to_docs(text, doc_max_char)
+        total_docs += len(docs)
+        for doc in docs:
+            if sampled_docs >= sample_docs:
+                break
+            sampled_tokens += len(tokenizer.encode([doc])[0])
+            sampled_docs += 1
+    if sampled_docs == 0:
+        return 0, 0
+    avg = sampled_tokens / sampled_docs
+    return int(avg * total_docs), total_docs
+
+
 def _text_document_batches(split, resume_state_dict, 
                            tokenizer_batch_size, text_files=None, doc_max_char=10000):
     ddp,ddp_rank,ddp_local_rank,ddp_world_size=get_dist_info()
