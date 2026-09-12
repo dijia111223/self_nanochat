@@ -46,6 +46,7 @@ rows = rows[:args.num_samples]
 
 correct = 0
 shown = 0
+per_class = {lab: [0, 0] for lab in LABELS}
 for r in rows:
     tokens = [bos, user_start] + tokenizer.encode(PROMPT + r["text"][:64]) + [user_end, assistant_start]
     out = []
@@ -60,9 +61,16 @@ for r in rows:
     pred = next((lab for lab in LABELS if lab in text), None)
     ok = pred == r["label"]
     correct += int(ok)
+    per_class[r["label"]][1] += 1
+    per_class[r["label"]][0] += int(ok)
     if shown < args.show:
         print(f"  标注={r['label']} 预测={pred} {'✓' if ok else '✗'} | 输出={text[:30]!r} | 正文={r['text'][:30]}")
         shown += 1
 
 total = len(rows)
 print(f"分类准确率: {correct}/{total} = {correct / max(1, total):.1%}  (10 类随机基线 10%)")
+print("分类别准确率:")
+for lab in LABELS:
+    c, t = per_class[lab]
+    if t:
+        print(f"  {lab}: {c:>3}/{t:<3} = {c / t:.0%}")

@@ -43,6 +43,9 @@ parser.add_argument("--model-step", type=int, default=None, help="model step to 
 parser.add_argument("--load-optimizer", type=int, default=1, help="warm-start optimizer from pretrained checkpoint (0=no, 1=yes)")
 # Training horizon
 parser.add_argument("--num-iterations", type=int, default=-1, help="number of optimization steps (-1 = full epoch)")
+# 初始权重来源：分阶段训练用（先在任务数据上 SFT，再在人格数据上续训）
+parser.add_argument("--init-source", type=str, default="base", choices=["base", "sft"], help="初始权重来源: base|sft")
+parser.add_argument("--init-tag", type=str, default=None, help="初始权重 tag（默认与 --model-tag 相同）")
 # Batch sizes (default: inherit from pretrained checkpoint)
 parser.add_argument("--max-seq-len", type=int, default=None, help="max context length (default: inherit from pretrain)")
 parser.add_argument("--device-batch-size", type=int, default=None, help="per-device batch size (default: inherit from pretrain)")
@@ -92,7 +95,7 @@ if not HAS_FA3:
     print0("WARNING: Flash Attention 3 not available, using PyTorch SDPA fallback. Training will be less efficient.")
 
 # Load the model and tokenizer
-model, tokenizer, meta = load_model("base", device, phase="train", model_tag=args.model_tag, step=args.model_step)
+model, tokenizer, meta = load_model(args.init_source, device, phase="train", model_tag=args.init_tag or args.model_tag, step=args.model_step)
 
 # Inherit training hyperparameters from pretrained checkpoint (None = inherit, explicit value = override)
 pretrain_user_config = meta.get("user_config", {})
@@ -117,6 +120,10 @@ for name, fallback, source in [
 
 orig_model = model
 #model = torch.compile(model, dynamic=False)
+# RoPE 表是按模型 config 建的，超过它会在运行时崩（或浪费算力），这里兜底下调
+if args.max_seq_len > model.config.sequence_len:
+    print0(f"[WARN] max_seq_len={args.max_seq_len} 超过模型上限 {model.config.sequence_len}，已下调")
+    args.max_seq_len = model.config.sequence_len
 depth = model.config.n_layer
 num_flops_per_token = model.estimate_flops()
 tokens_per_fwdbwd = args.device_batch_size * args.max_seq_len # tokens per iteration for a single rank
@@ -138,7 +145,8 @@ optimizer = model.setup_optimizer(unembedding_lr=args.unembedding_lr, embedding_
 # restore our fresh SFT LRs after loading.
 base_dir = get_base_dir()
 if args.load_optimizer:
-    optimizer_data = load_optimizer_state("base", device, rank=ddp_rank, model_tag=args.model_tag, step=args.model_step)
+    optimizer_data = load_optimizer_state(args.init_source, device, rank=ddp_rank,
+                                          model_tag=args.init_tag or args.model_tag, step=args.model_step)
     if optimizer_data is not None:
         base_lrs = [group["lr"] for group in optimizer.param_groups]
         optimizer.load_state_dict(optimizer_data)

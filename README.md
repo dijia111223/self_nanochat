@@ -106,7 +106,7 @@ python bench_inference.py --source sft --model-tag d8 --contexts 32,64,128,192 -
 ## 扩展点（本项目增量）
 
 - `nanochat/dataloader.py`：`txt_to_docs`（line_mode 按行切）+ `_text_document_batches`（本地文本数据迭代）
-- `scripts/chat_sft.py`：`--text-path` + `LocalChatDataset`（本地对话数据）
+- `scripts/chat_sft.py`：`--text-path` + `LocalChatDataset`（本地对话数据）+ `--init-source/--init-tag`（从已有对话模型分阶段续训）
 - `scripts/tok_train.py`：`--text-path`（本地文本训 tokenizer）
 - `nanochat/common.py`：`LOCAL_MODE` 双模式开关
 - `nanochat/mini_engine.py`：从零实现的 KV Cache 推理引擎（接口兼容 + prefill/decode + 对比实验）
@@ -144,6 +144,26 @@ python bench_inference.py --source sft --model-tag d8 --contexts 32,64,128,192 -
 - 人格对话被淹没（49 / 30,049 = 0.16%）→ 闲聊能力要单独配比或在任务训练后再训
 - v6 的 bpb 反而更高（3.26 > 2.95）：v5 的验证集只有 49 种固定答案，本身高度可预测，**bpb 不是跨数据集可比的指标**
 - 概括/续写仍然退化（基座只见过 12 万 token 新闻，语言能力本身很弱）
+
+### 3. 灾难性遗忘与分阶段训练（人格 vs 任务）
+
+v7 把人格对话占比从 0.16% 提到 4.7%，模型**依然只会分类**（问"你好"答"时尚。"）。为此给 `chat_sft.py` 加了 `--init-source sft --init-tag <tag>`：可以从已有对话模型继续训练（分阶段 SFT）。四组对照：
+
+| 方案 | 分类准确率 | 闲聊"你好" |
+|---|---|---|
+| v7 单阶段（人格 4.7%） | 58.5% | ❌ "时尚。" |
+| v7 → **纯人格续训 60 步** | **9.0%**（≈随机，崩） | ✅ **"你好！很高兴见到你，有什么可以帮你？"** |
+| v7 → 人格 + 分类 **replay** 各半，60 步 | **63.0%** | ❌ "推理时重复计算。" |
+| v7 → 纯人格 + **低 LR**（matrix_lr 0.004），40 步 | 48.0% | ❌ 退化输出 |
+
+- **灾难性遗忘实锤**：60 步纯人格训练把分类从 58.5% 打到 9.0%，重现了 GPU 上观察到的 bpb 3.27→12.91
+- **replay 保住了任务能力**（63.0%，比单阶段还高），但人格没学会——人格样本短、监督量被任务数据稀释
+- **低 LR 只能减缓遗忘**（48.0%），不能让人格学会
+- 40M 模型 + 600 步 SFT 的容量下，两种能力互相挤压；真实模型的解法是 **LoRA / 任务模板或系统提示区分 / 更大模型**
+- 实际可用的两个模型：`d8r`（replay，63% 分类，任务用）、`d8p`（纯人格，闲聊用）
+
+> 踩坑：从 SFT checkpoint 续训时，`meta` 里的 `max_seq_len=2048` 与模型实际的 256 不符，会直接触发 `total_batch_size` 断言崩溃 → 已在脚本里兜底下调到模型上限。
+
 
 ## 文档
 

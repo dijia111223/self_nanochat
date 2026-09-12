@@ -42,6 +42,9 @@ def main():
     parser.add_argument("--out", type=str, default="local_chat_v6.jsonl")
     parser.add_argument("--eval-out", type=str, default="sft_eval_cls.jsonl")
     parser.add_argument("--num-rows", type=int, default=30000)
+    parser.add_argument("--cls-ratio", type=float, default=0.5, help="分类任务占比")
+    parser.add_argument("--sum-ratio", type=float, default=0.3, help="概括任务占比（其余为续写）")
+    parser.add_argument("--identity-copies", type=int, default=1, help="身份问答复制份数（提高人格占比）")
     parser.add_argument("--eval-per-class", type=int, default=100)
     parser.add_argument("--identity-path", type=str, default="local_chat_v5.jsonl")
     parser.add_argument("--seed", type=int, default=0)
@@ -76,9 +79,9 @@ def main():
         if len(rows) >= args.num_rows:
             break
         r = random.random()
-        if r < 0.5:
+        if r < args.cls_ratio:
             task, user, assistant = "cls", CLS_PROMPT + text[:64], f"{label}。"
-        elif r < 0.8:
+        elif r < args.cls_ratio + args.sum_ratio:
             task, user, assistant = "sum", SUM_PROMPT + text[:96], first_sentence(text)
         else:
             task, user, assistant = "cont", CONT_PROMPT + text[:48], text[48:180]
@@ -98,8 +101,8 @@ def main():
                 if line:
                     conv = json.loads(line)
                     seen.setdefault(json.dumps(conv, ensure_ascii=False), conv)
-        rows.extend(seen.values())
-        print(f"身份问答: {len(seen)} 条")
+        rows.extend(list(seen.values()) * max(1, args.identity_copies))
+        print(f"身份问答: {len(seen)} 条 × {max(1, args.identity_copies)} 份 = {len(seen) * max(1, args.identity_copies)} 条")
 
     random.shuffle(rows)
     with open(args.out, "w", encoding="utf-8") as f:
