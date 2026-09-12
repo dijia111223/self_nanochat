@@ -148,6 +148,34 @@ python sft_eval.py --source sft --model-tag d8m --num-samples 1000
 ```
 
 
+## 实验 6：对标真实模型（Qwen2.5-0.5B-Instruct）
+
+`bench_hf.py` 用与 `bench_inference.py` **完全相同的方法**（手动 prefill + `past_key_values` 逐步 decode）测 HuggingFace 模型。
+
+| 指标 | 自研 d8（40.7M） | Qwen2.5-0.5B-Instruct（494M） |
+|---|---|---|
+| 层数 / Q头 / **KV头** / head_dim | 8 / 4 / 4 / 128 | 24 / 14 / **2** / 64 |
+| TTFT @ 128 token | 50.1 ms | 539.2 ms |
+| TPOT | **13.7 ms/token** | 121.4 ms/token |
+| **KV Cache** | 32.0 KB/token | **24.0 KB/token** |
+| TPOT 随上下文变化 | 否（常数） | 否（常数） |
+
+**关键结论**：
+- **参数量大 12 倍，KV Cache 反而小 25%**：Qwen 用 GQA——14 个 Q 头只配 **2 个 KV 头**，head_dim 也只有 64。
+  → 说明推理优化的核心不是"模型多大"，而是 **decode 时每 token 要搬运多少 KV 字节**（decode 是 memory-bound）
+- TPOT 与参数量近似线性：121.4 / 13.7 ≈ 8.9x，而参数比 494 / 40.7 ≈ 12.1x（decode 阶段瓶颈是读权重）
+- 两个模型的 TPOT **都是常数**（不随上下文增长）——反向验证了 KV Cache 方法论的正确性
+- TTFT 随上下文增长（prefill 是 compute-bound）：197.6 → 539.2 ms
+
+```powershell
+$env:HF_ENDPOINT="https://hf-mirror.com"
+python bench_hf.py --model Qwen/Qwen2.5-0.5B-Instruct --contexts 32,64,128 --max-new 8
+```
+
+> 环境坑：本地 `torch 2.13` 与 `torchvision 0.20.1` ABI 不匹配（`RuntimeError: operator torchvision::nms does not exist`），
+> 而 transformers 5.15 加载任何模型都会强制 import torchvision → **本地所有 HF 模型都加载不了**。
+> 卸载 torchvision 后解决（真需要时再装与 torch 匹配的版本）。
+
 ---
 
 ## 踩坑汇总
