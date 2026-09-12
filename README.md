@@ -96,7 +96,7 @@ python -m scripts.mini_engine --source base --model-tag d8 --compare --compare-t
 - **TPOT 是常数**（~14 ms/token，与上下文长度无关）——decode 每步只算 1 个 token，复杂度 O(1)
 - **全量重算的 TPOT 线性增长**（23 → 57 ms/token）——每步重算全部历史，复杂度 O(T)
 - 所以加速比随上下文增长（1.64x → 4.17x）：**上下文越长，KV Cache 越关键**
-- KV Cache 占用：**32 KB/token**（2 × 8 层 × 4 KV 头 × 128 head_dim × 2 字节 fp16），seq=256 时 8 MB/序列
+- KV Cache 占用：**32 KB/token**（2 × 8 层 × 4 KV 头 × 128 head_dim × 4 字节，CPU 上 `COMPUTE_DTYPE` 是 float32；GPU bf16 时减半为 16 KB/token），seq=256 时 8 MB/序列
 
 ```bash
 python bench_inference.py --source sft --model-tag d8 --contexts 32,64,128,192 --max-new 32
