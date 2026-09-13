@@ -1,8 +1,5 @@
 """推理性能基准：TTFT / TPOT（KV Cache vs 全量重算）。
 
-TTFT = Time To First Token（prefill 一个 prompt 的耗时）
-TPOT = Time Per Output Token（decode 阶段每生成一个 token 的耗时）
-
 用法:
     python bench_inference.py --source sft --model-tag d8
     python bench_inference.py --contexts 32,64,128,192 --max-new 32 --repeats 3

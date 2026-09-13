@@ -1,31 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-KV Cache 推理引擎。
-
-与 nanochat.engine.Engine 接口兼容，可直接替换：
+KV Cache 推理引擎，接口与 nanochat.engine.Engine 兼容，可直接替换。
 
     from nanochat.mini_engine import MiniEngine
     engine = MiniEngine(model, tokenizer)
     for token_column, token_masks in engine.generate(tokens, num_samples=1, max_tokens=256):
         ...
 
-兼容接口：
-    generate(tokens, num_samples=1, max_tokens=256, temperature=1.0, top_k=None, seed=42)
-        流式生成，每步 yield (token_column, token_masks)，长度均为 num_samples
-    generate_batch(tokens, num_samples=1, **kwargs)
-        非流式，返回 (results, masks)，终止 token（assistant_end / bos）不计入结果
-
-附加接口：
-    generate_cached(...)  单样本增量解码（prefill + decode）
-    generate_naive(...)   朴素生成，每步重算全部历史，作为对照实现
-    compare(...)          cache 与 naive 的正确性校验 + prefill/decode 耗时对比
-    chat(prompt, ...)     对话生成
-
-实现说明：
-    1. prefill 阶段一次性计算 prompt 的 K/V 并写入 cache
-    2. decode 阶段每步只输入 1 个新 token，历史 K/V 复用 cache
-    3. cache 的 KV 头数取 config.n_kv_head，支持 GQA
-    4. 位置编码由模型内部依据 cache 位置（cache.get_pos()）选取 RoPE
+generate / generate_batch 与 Engine 签名一致；另有 generate_cached（prefill + decode）、
+generate_naive（每步重算全部历史，作对照）、compare（正确性校验 + 耗时对比）、chat。
 """
 
 import time
@@ -60,9 +43,6 @@ class MiniEngine:
             self.tokenizer.get_bos_token_id(),
         }
 
-    # ==================================================================
-    # 流式生成（与 Engine.generate 兼容）
-    # ==================================================================
     def generate(self, tokens, num_samples=1, max_tokens=256, temperature=1.0, top_k=None, seed=42):
         """
         流式生成，每步 yield (token_column, token_masks)
@@ -104,9 +84,6 @@ class MiniEngine:
                 x = torch.tensor([[t] for t in nxt], dtype=torch.long, device=self.device)
                 logits = self.model.forward(x, kv_cache=cache)
 
-    # ==================================================================
-    # 非流式批量生成（与 Engine.generate_batch 兼容）
-    # ==================================================================
     def generate_batch(self, tokens, num_samples=1, **kwargs):
         """返回 (results, masks)；终止 token（assistant_end / bos）不计入结果。"""
         results = [list(tokens) for _ in range(num_samples)]
@@ -124,9 +101,6 @@ class MiniEngine:
                 break
         return results, masks
 
-    # ==================================================================
-    # 单样本增量解码（prefill + decode）
-    # ==================================================================
     def generate_cached(self, tokens, max_new=50, temperature=0.0, top_k=None,
                         seed=42, stop_at_end=True):
         """prefill + decode：prefill 一次算完 prompt，decode 每步只喂 1 个新 token"""
@@ -160,9 +134,6 @@ class MiniEngine:
                 logits = self.model.forward(x, kv_cache=cache)   # 只算 1 个 token
         return out
 
-    # ==================================================================
-    # 朴素生成（无 cache，每步输入全部历史并重算 K/V），作为对照实现
-    # ==================================================================
     def generate_naive(self, tokens, max_new=50, temperature=0.0, top_k=None,
                        seed=42, stop_at_end=True):
         self.model.eval()
@@ -194,9 +165,6 @@ class MiniEngine:
         probs = torch.softmax(logits, dim=-1)
         return [int(t) for t in torch.multinomial(probs, num_samples=1, generator=rng).squeeze(-1)]
 
-    # ==================================================================
-    # 对比实验：cache vs naive
-    # ==================================================================
     def compare(self, tokens, max_new=50):
         """
         公平对比：贪心解码 + 强制生成满额（忽略停止 token）
@@ -268,9 +236,6 @@ class MiniEngine:
         return {"same": same, "t_prefill": t_prefill, "t_decode": t_decode,
                 "t_naive": t_naive, "ms_cache": ms_cache, "ms_naive": ms_naive}
 
-    # ==================================================================
-    # 对话
-    # ==================================================================
     def chat(self, prompt, max_new=50, temperature=0.0, top_k=None):
         ids, _ = self.tokenizer.render_conversation(
             {"messages": [{"role": "user", "content": prompt}]}

@@ -1,14 +1,8 @@
-"""用同一套 TTFT/TPOT 方法测 HuggingFace 模型的推理性能（对标自研 40M 模型）。
-
-TTFT = Time To First Token（prefill 耗时）
-TPOT = Time Per Output Token（decode 阶段每个 token 的耗时）
+"""用同一套 TTFT/TPOT 指标测 HuggingFace 模型（对标自研模型）。
 
 用法:
     python bench_hf.py --model Qwen/Qwen2.5-0.5B-Instruct --contexts 32,64,128 --max-new 16
-    python bench_hf.py --model Qwen/Qwen2.5-0.5B-Instruct --dtype bfloat16   # GPU 上用
-
-和 bench_inference.py 的区别：那个测的是自己的 nanochat/MiniEngine 链路，
-这个测 HuggingFace 模型，两者用同一套指标，可以直接对比。
+    python bench_hf.py --model Qwen/Qwen2.5-0.5B-Instruct --dtype bfloat16   # GPU
 """
 import argparse
 import statistics
