@@ -201,6 +201,58 @@ python sft_eval.py --source sft --model-tag d8m --num-samples 200 --prefix-chars
 
 ---
 
+## 实验 8：训练步瓶颈分析与吞吐优化
+
+`profile_step.py`（CPU，SFT d8，batch 1×256）：
+
+| 环节 | 耗时 |
+|---|---|
+| forward + backward | 303.5 ms |
+| **optimizer.step()（Muon 的 Newton-Schulz 迭代）** | **1879.8 ms（占 86%）** |
+
+梯度累积（优化器开销按"步"计、不按 token 计 → 攒大 batch 几乎免费）：
+
+| 累积 | ms/步 | tokens/步 | 吞吐 |
+|---|---|---|---|
+| x1 | 2155 | 256 | 118.8 tok/s |
+| x2 | 2482 | 512 | 206.3 tok/s |
+| x4 | 3359 | 1024 | 304.9 tok/s |
+| **x8** | 4481 | 2048 | **457.1 tok/s（3.85x）** |
+
+CPU 线程伸缩性（forward）：1 线程 382.6 ms → 8 线程 **94.6 ms（4.0x）** → 14 线程 89.5 ms（无收益）
+
+**结论**：
+- 训练在这里**不是计算受限，是优化器受限**：Muon 的 Newton-Schulz 作用在参数矩阵上，与输入 batch 大小无关 → batch=1 时它占 86%
+- 所以**加大有效 batch 是免费的杠杆**：×8 累积拿到 **3.85x** 吞吐（诚实边界：这是纯计算吞吐，真实训练还要叠加数据加载/分词开销）
+- 线程数 8 是甜点，14 线程无收益 → `torch.set_num_threads(8)`，把余下线程让给 dataloader
+
+```powershell
+python profile_step.py --source sft --model-tag d8
+```
+
+---
+
+## 文献坐标（每个实验在文献里的位置）
+
+> 用途：让工程报告变成研究材料 —— 复试/面试被问"这相对已有工作是什么位置"时能答。
+> 以下是**方向坐标**（代表作），写进正式材料前请把年份/出处核一遍。
+
+| 实验 | 对应工作 | 你的结果相对它是什么位置 |
+|---|---|---|
+| 1 tokenizer × 规模 | GPT-2（byte-level BPE）；Kaplan et al. 2020 / Hoffmann et al. 2022（Chinchilla 缩放律） | 在极小规模上复现了"词表决定中文表达力"和"参数/数据共同决定上限" |
+| 2 SFT 数据规模 | InstructGPT（Ouyang et al. 2022）；**LIMA**（Zhou et al. 2023，"Less Is More for Alignment"）；Self-Instruct（Wang et al. 2022） | LIMA 说"少量高质量就够"；你的**反向极端**（49 种 × 重复 240 次）直接崩坏 → 补上"**重复 ≠ 数量、多样性才是关键**"这一面 |
+| 3 灾难性遗忘 | EWC（Kirkpatrick et al. 2017）；Experience Replay（Rolnick et al. 2019）；LoRA（Hu et al. 2021）；Luo et al. 2023（LLM 持续微调的遗忘实证） | 在 40M 规模**量化**了"60 步即可崩到随机水平"，并验证 replay 保任务、低 LR 只减缓 —— 小模型上的可复现证据 |
+| 4 TTFT/TPOT | vLLM / **PagedAttention**（Kwon et al. 2023）；FlashAttention（Dao et al. 2022）；Orca（Yu et al. 2022，continuous batching） | 自研引擎复现了"decode O(1) vs 全量 O(T)"，指标口径与 serving 领域一致（可直接对标） |
+| 5 预训练扩容 | Chinchilla（Hoffmann et al. 2022）；**TinyStories**（Eldan & Li 2023）；Emergent Abilities（Wei et al. 2022） | 你的结论（数据量 ×3 无可测量收益、SFT 主导）是缩放律在**远未饱和区**的边界条件/反例 |
+| 6 对标 Qwen2.5 | MQA（Shazeer 2019）；**GQA**（Ainslie et al. 2023）；Qwen2.5 技术报告；Roofline（Williams et al. 2009） | 实测说明"KV Cache 大小由架构（KV 头数 × head_dim）决定，而非参数量"，与 GQA 的设计动机一致 |
+| 7 输入长度/格式 | 提示敏感性：Lu et al. 2022（prompt 顺序/格式敏感性）；chat template 工程实践 | 量化了"格式不一致直接崩 38 个点"，是提示敏感性在**训练格式**层面的极端案例 |
+| 8 训练瓶颈 | Muon（Jordan et al. 2024，技术报告）；梯度累积是标准工程手段 | 指出"小 batch + 重优化器（NS 迭代）"时瓶颈从计算转到优化器，**batch 成为免费杠杆** |
+
+**建议阅读顺序**（与项目一一对应）：
+PagedAttention → FlashAttention → GQA → LIMA → Chinchilla / TinyStories → EWC / Replay → Muon
+
+---
+
 ## 踩坑汇总
 
 1. **`--max-seq-len` 默认是 2048，模型却是 256** → `AssertionError: total_batch_size (256) must be a multiple of 2048`。base_train 要显式传 `--max-seq-len 256`；chat_sft 续训时已在脚本里加兜底（超过模型 `config.sequence_len` 自动下调）
