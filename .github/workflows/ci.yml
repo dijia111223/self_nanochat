@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装 CPU 版 PyTorch 与测试依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install filelock pytest
+
+      # test_execution.py 依赖 Unix 的 resource 模块（沙箱/超时测试），纯 CPU 冒烟不跑；
+      # test_tokenizer.py / test_tasks.py 需要训练好的分词器或数据集，也不进冒烟集。
+      - name: 单元测试（CPU 可跑的快速集）
+        run: |
+          pytest tests/test_kvcache_equiv.py tests/test_engine.py \
+                 tests/test_attention_fallback.py tests/test_optim.py -q

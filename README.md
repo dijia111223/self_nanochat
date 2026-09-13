@@ -1,7 +1,10 @@
 # self_nanochat —— 本地文件 LLM 训练器
 
+[![ci](https://github.com/dijia111223/self_nanochat/actions/workflows/ci.yml/badge.svg)](https://github.com/dijia111223/self_nanochat/actions/workflows/ci.yml)
+
 > 基于 [nanochat](https://github.com/karpathy/nanochat)（karpathy）扩展：**支持本地文件训练**（不依赖云端数据集），提供"本地/云端"双模式。
 > 从零跑通完整 LLM 训练流程：分词 → 预训练 → SFT（对话微调）→ 评估 → 对话。
+> 8 组实验的数字、复现命令与已知偏差见 [REPRODUCE.md](REPRODUCE.md)。
 
 ## 特性
 
@@ -184,7 +187,8 @@ v7 把人格对话占比从 0.16% 提到 4.7%，模型**依然只会分类**（�
 
 ## 文档
 
-- [EXPERIMENTS.md](EXPERIMENTS.md) —— 全部实验记录（数据规模 / 灾难性遗忘 / 推理性能）+ 复现命令 + 踩坑汇总
+- [REPRODUCE.md](REPRODUCE.md) —— 复现指南：8 组实验的命令 + 预期数字 + 耗时 + 已知偏差
+- [EXPERIMENTS.md](EXPERIMENTS.md) —— 全部实验记录（数据规模 / 灾难性遗忘 / 推理性能）+ 复现命令 + 踩坑汇总 + 文献坐标
 - [SFT实战记录.md](SFT实战记录.md) —— 从零训练到对话的完整实战记录 + 踩坑
 
 ## 致谢
